@@ -61,6 +61,7 @@ static sc_pkcs11_mechanism_type_t openssl_sha1_mech = {
 	sc_pkcs11_openssl_md_final,
 	NULL, NULL, NULL, NULL,	/* sign_* */
 	NULL, NULL, NULL,	/* verif_* */
+	NULL, NULL,		/* encrypt_* */
 	NULL, NULL,		/* decrypt_* */
 	NULL,			/* derive */
 	NULL,			/* wrap */
@@ -80,6 +81,7 @@ static sc_pkcs11_mechanism_type_t openssl_sha224_mech = {
 	sc_pkcs11_openssl_md_final,
 	NULL, NULL, NULL, NULL,	/* sign_* */
 	NULL, NULL, NULL,	/* verif_* */
+	NULL, NULL,		/* encrypt_* */
 	NULL, NULL,		/* decrypt_* */
 	NULL,			/* derive */
 	NULL,			/* wrap */
@@ -99,6 +101,7 @@ static sc_pkcs11_mechanism_type_t openssl_sha256_mech = {
 	sc_pkcs11_openssl_md_final,
 	NULL, NULL, NULL, NULL,	/* sign_* */
 	NULL, NULL, NULL,	/* verif_* */
+	NULL, NULL,		/* encrypt_* */
 	NULL, NULL,		/* decrypt_* */
 	NULL,			/* derive */
 	NULL,			/* wrap */
@@ -118,6 +121,7 @@ static sc_pkcs11_mechanism_type_t openssl_sha384_mech = {
 	sc_pkcs11_openssl_md_final,
 	NULL, NULL, NULL, NULL,	/* sign_* */
 	NULL, NULL, NULL,	/* verif_* */
+	NULL, NULL,		/* encrypt_* */
 	NULL, NULL,		/* decrypt_* */
 	NULL,			/* derive */
 	NULL,			/* wrap */
@@ -137,6 +141,7 @@ static sc_pkcs11_mechanism_type_t openssl_sha512_mech = {
 	sc_pkcs11_openssl_md_final,
 	NULL, NULL, NULL, NULL,	/* sign_* */
 	NULL, NULL, NULL,	/* verif_* */
+	NULL, NULL,		/* encrypt_* */
 	NULL, NULL,		/* decrypt_* */
 	NULL,			/* derive */
 	NULL,			/* wrap */
@@ -156,6 +161,7 @@ static sc_pkcs11_mechanism_type_t openssl_gostr3411_mech = {
 	sc_pkcs11_openssl_md_final,
 	NULL, NULL, NULL, NULL,	/* sign_* */
 	NULL, NULL, NULL,	/* verif_* */
+	NULL, NULL,		/* encrypt_* */
 	NULL, NULL,		/* decrypt_* */
 	NULL,			/* derive */
 	NULL,			/* wrap */
@@ -175,6 +181,7 @@ static sc_pkcs11_mechanism_type_t openssl_md5_mech = {
 	sc_pkcs11_openssl_md_final,
 	NULL, NULL, NULL, NULL,	/* sign_* */
 	NULL, NULL, NULL,	/* verif_* */
+	NULL, NULL,		/* encrypt_* */
 	NULL, NULL,		/* decrypt_* */
 	NULL,			/* derive */
 	NULL,			/* wrap */
@@ -194,6 +201,7 @@ static sc_pkcs11_mechanism_type_t openssl_ripemd160_mech = {
 	sc_pkcs11_openssl_md_final,
 	NULL, NULL, NULL, NULL,	/* sign_* */
 	NULL, NULL, NULL,	/* verif_* */
+	NULL, NULL,		/* encrypt_* */
 	NULL, NULL,		/* decrypt_* */
 	NULL,			/* derive */
 	NULL,			/* wrap */
@@ -461,7 +469,7 @@ CK_RV sc_pkcs11_verify_data(const unsigned char *pubkey, unsigned int pubkey_len
 	 * PKCS#11 does not define CKA_VALUE for public keys, and different cards
 	 * return either the raw or spki versions as defined in PKCS#15
 	 * And we need to support more then just RSA.
-	 * We can use d2i_PUBKEY which works for SPKI and any key type. 
+	 * We can use d2i_PUBKEY which works for SPKI and any key type.
 	 */
 	pubkey_tmp = pubkey; /* pass in so pubkey pointer is not modified */
 

@@ -53,12 +53,14 @@ extern "C" {
 #define SC_FORMAT_LEN_PTRDIFF_T "t"
 #endif
 
-#define SC_SEC_OPERATION_DECIPHER	0x0001
-#define SC_SEC_OPERATION_SIGN		0x0002
-#define SC_SEC_OPERATION_AUTHENTICATE	0x0003
+#define SC_SEC_OPERATION_DECIPHER       0x0001
+#define SC_SEC_OPERATION_SIGN           0x0002
+#define SC_SEC_OPERATION_AUTHENTICATE   0x0003
 #define SC_SEC_OPERATION_DERIVE         0x0004
-#define SC_SEC_OPERATION_WRAP		0x0005
-#define SC_SEC_OPERATION_UNWRAP		0x0006
+#define SC_SEC_OPERATION_WRAP           0x0005
+#define SC_SEC_OPERATION_UNWRAP         0x0006
+#define SC_SEC_OPERATION_ENCRYPT_SYM    0x0007
+#define SC_SEC_OPERATION_DECRYPT_SYM    0x0008
 
 /* sc_security_env flags */
 #define SC_SEC_ENV_ALG_REF_PRESENT	0x0001
@@ -799,6 +801,29 @@ struct sc_card_operations {
 	int (*wrap)(struct sc_card *card, u8 *out, size_t outlen);
 
 	int (*unwrap)(struct sc_card *card, const u8 *crgram, size_t crgram_len);
+
+	/* encrypt_sym:  Engages the enciphering operation with a sym. key.  Card will use the
+	 *   security environment set in a call to set_security_env or restore_security_env.
+	 *
+	 *   Responsibility for padding to block_size (if applicable) depends on AES algorithm_flags used:
+	 *   SC_ALGORITHM_AES_ECB and SC_ALGORITHM_AES_CBC: The calling PKCS#11 app. is responsible.
+	 *   SC_ALGORITHM_AES_CBC_PAD: The card driver is responsible, assuming that all cards
+	 *   require block_size multiple as input.
+	 */
+	int (*encrypt_sym)(struct sc_card *card, const u8 * plaintext, size_t plaintext_len,
+			u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags);
+
+	/* decrypt_sym:  Engages the deciphering operation with a sym. key.  Card will use the
+	 *   security environment set in a call to set_security_env or
+	 *   restore_security_env.
+	 *
+	 *   Responsibility for removing padding (if applicable) depends on AES algorithm_flags used:
+	 *   SC_ALGORITHM_AES_ECB and SC_ALGORITHM_AES_CBC: The calling PKCS#11 app. is responsible.
+	 *   SC_ALGORITHM_AES_CBC_PAD: The card driver is responsible, assuming that all cards
+	 *   return block_size multiple as output.
+	 */
+	int (*decrypt_sym)(struct sc_card *card, const u8 * crgram, size_t crgram_len,
+			u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags);
 };
 
 typedef struct sc_card_driver {
@@ -1352,6 +1377,11 @@ int sc_reset_retry_counter(struct sc_card *card, unsigned int type,
 			   const u8 *newref, size_t newlen);
 int sc_build_pin(u8 *buf, size_t buflen, struct sc_pin_cmd_pin *pin, int pad);
 
+int sc_encrypt_sym(struct sc_card *card, const u8 * plaintext, size_t plaintext_len,
+			 u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags);
+int sc_decrypt_sym(struct sc_card *card, const u8 * crgram, size_t crgram_len,
+			 u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags);
+
 
 /********************************************************************/
 /*               ISO 7816-9 related functions                       */
@@ -1613,7 +1643,7 @@ extern const char *sc_get_version(void);
 
 extern sc_card_driver_t *sc_get_iso7816_driver(void);
 
-/** 
+/**
  * @brief Read a complete EF by short file identifier.
  *
  * @param[in]     card   card
@@ -1680,7 +1710,7 @@ iso7816_build_pin_apdu(struct sc_card *card, struct sc_apdu *apdu,
 /**
  * Free a buffer returned by OpenSC.
  * Use this instead your C libraries free() to free memory allocated by OpenSC.
- * For more details see <https://github.com/OpenSC/OpenSC/issues/2054> 
+ * For more details see <https://github.com/OpenSC/OpenSC/issues/2054>
  *
  * @param[in] p the buffer
  */

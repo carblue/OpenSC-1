@@ -650,7 +650,7 @@ iso7816_get_challenge(struct sc_card *card, u8 *rnd, size_t len)
 	if (len < apdu.resplen) {
 		return (int) len;
 	}
-   
+
 	return (int) apdu.resplen;
 }
 
@@ -1286,7 +1286,9 @@ static struct sc_card_operations iso_ops = {
 	NULL,			/* read_public_key */
 	NULL,			/* card_reader_lock_obtained */
 	NULL,			/* wrap */
-	NULL			/* unwrap */
+	NULL,			/* unwrap */
+	NULL,			/* encrypt_sym */
+	NULL			/* decrypt_sym */
 };
 
 static struct sc_card_driver iso_driver = {

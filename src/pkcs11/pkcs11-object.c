@@ -44,6 +44,8 @@ static sc_pkcs11_mechanism_type_t find_mechanism = {
 	NULL,		/* verif_init */
 	NULL,		/* verif_update */
 	NULL,		/* verif_final */
+	NULL,		/* encrypt_init */
+	NULL,		/* encrypt */
 	NULL,		/* decrypt_init */
 	NULL,		/* decrypt */
 	NULL,		/* derive */
@@ -819,7 +821,49 @@ C_EncryptInit(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		CK_MECHANISM_PTR pMechanism,	/* the encryption mechanism */
 		CK_OBJECT_HANDLE hKey)		/* handle of encryption key */
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	CK_BBOOL can_encrypt;
+	CK_KEY_TYPE key_type;
+	CK_ATTRIBUTE encrypt_attribute = { CKA_ENCRYPT, &can_encrypt, sizeof(can_encrypt) };
+	CK_ATTRIBUTE key_type_attr = { CKA_KEY_TYPE, &key_type, sizeof(key_type) };
+	struct sc_pkcs11_session *session;
+	struct sc_pkcs11_object *object;
+	CK_RV rv;
+
+	if (pMechanism == NULL_PTR)
+		return CKR_ARGUMENTS_BAD;
+
+	rv = sc_pkcs11_lock();
+	if (rv != CKR_OK)
+		return rv;
+
+	rv = get_object_from_session(hSession, hKey, &session, &object);
+	if (rv != CKR_OK) {
+		if (rv == CKR_OBJECT_HANDLE_INVALID)
+			rv = CKR_KEY_HANDLE_INVALID;
+		goto out;
+	}
+
+	if (object->ops->encrypt == NULL_PTR) {
+		rv = CKR_KEY_TYPE_INCONSISTENT;
+		goto out;
+	}
+
+	rv = object->ops->get_attribute(session, object, &encrypt_attribute);
+	if (rv != CKR_OK || !can_encrypt) {
+        goto out;
+	}
+	rv = object->ops->get_attribute(session, object, &key_type_attr);
+	if (rv != CKR_OK) {
+		rv = CKR_KEY_TYPE_INCONSISTENT;
+		goto out;
+	}
+
+	rv = sc_pkcs11_encr_init(session, pMechanism, object, key_type);
+
+out:
+	sc_log(context, "C_EncryptInit() = %s", lookup_enum ( RV_T, rv ));
+	sc_pkcs11_unlock();
+	return rv;
 }
 
 
@@ -827,9 +871,39 @@ CK_RV C_Encrypt(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		CK_BYTE_PTR pData,	/* the plaintext data */
 		CK_ULONG ulDataLen,	/* bytes of plaintext data */
 		CK_BYTE_PTR pEncryptedData,	/* receives encrypted data */
-		CK_ULONG_PTR pulEncryptedDataLen)
-{				/* receives encrypted byte count */
-	return CKR_FUNCTION_NOT_SUPPORTED;
+		CK_ULONG_PTR pulEncryptedDataLen)	/* receives encrypted byte count */
+{
+	CK_RV rv;
+	struct sc_pkcs11_session *session;
+	const unsigned char block_size = 16; /* FIXME that limits the impl. to block ciphers like AES */
+
+	/* EncryptedData buffer size query */
+	if (!pEncryptedData && pulEncryptedDataLen) {
+		/* with respect to CKM_AES_CBC_PAD's block cipher padding method detailed in PKCS#7 */
+		*pulEncryptedDataLen = (ulDataLen / block_size) * block_size + block_size;
+		return CKR_OK;
+	}
+	if (!pData || !pEncryptedData || !pulEncryptedDataLen) {
+		return CKR_ARGUMENTS_BAD;
+	}
+
+	rv = sc_pkcs11_lock();
+	if (rv != CKR_OK)
+		return rv;
+
+	rv = get_session(hSession, &session);
+	if (rv == CKR_OK) {
+		rv = restore_login_state(session->slot);
+		if (rv == CKR_OK) {
+			rv = sc_pkcs11_encr(session, pData,
+				ulDataLen, pEncryptedData, pulEncryptedDataLen);
+		}
+		rv = reset_login_state(session->slot, rv);
+	}
+
+	sc_log(context, "C_Encrypt() = %s", lookup_enum ( RV_T, rv ));
+	sc_pkcs11_unlock();
+	return rv;
 }
 
 CK_RV C_EncryptUpdate(CK_SESSION_HANDLE hSession,	/* the session's handle */
@@ -907,10 +981,22 @@ CK_RV C_Decrypt(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		CK_BYTE_PTR pEncryptedData,	/* input encrypted data */
 		CK_ULONG ulEncryptedDataLen,	/* count of bytes of input */
 		CK_BYTE_PTR pData,	/* receives decrypted output */
-		CK_ULONG_PTR pulDataLen)
-{				/* receives decrypted byte count */
+		CK_ULONG_PTR pulDataLen)	/* receives decrypted byte count */
+{
 	CK_RV rv;
 	struct sc_pkcs11_session *session;
+	const unsigned char block_size = 16; /* FIXME that limits the impl. to block ciphers like AES */
+
+	if (ulEncryptedDataLen % block_size)
+		return CKR_DATA_LEN_RANGE;
+    /* pData buffer size query */
+	if (!pData && pulDataLen) {
+		*pulDataLen = ulEncryptedDataLen;
+		return CKR_OK;
+	}
+	if (!pEncryptedData || !pData || !pulDataLen) {
+		return CKR_ARGUMENTS_BAD;
+	}
 
 	rv = sc_pkcs11_lock();
 	if (rv != CKR_OK)
@@ -921,7 +1007,7 @@ CK_RV C_Decrypt(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		rv = restore_login_state(session->slot);
 		if (rv == CKR_OK) {
 			rv = sc_pkcs11_decr(session, pEncryptedData,
-					ulEncryptedDataLen, pData, pulDataLen);
+				ulEncryptedDataLen, pData, pulDataLen);
 		}
 		rv = reset_login_state(session->slot, rv);
 	}

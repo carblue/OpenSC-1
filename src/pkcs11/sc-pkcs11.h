@@ -122,6 +122,11 @@ struct sc_pkcs11_object_ops {
 			void*,
 			CK_BYTE_PTR pData, CK_ULONG_PTR ulDataLen);
 
+	CK_RV (*encrypt)(struct sc_pkcs11_session *, void *,
+			CK_MECHANISM_PTR,
+			CK_BYTE_PTR pPlainData, CK_ULONG ulPlainDataLen,
+			CK_BYTE_PTR pData, CK_ULONG_PTR pulDataLen);
+
 	/* Others to be added when implemented */
 };
 
@@ -241,6 +246,7 @@ enum {
 	SC_PKCS11_OPERATION_SIGN,
 	SC_PKCS11_OPERATION_VERIFY,
 	SC_PKCS11_OPERATION_DIGEST,
+	SC_PKCS11_OPERATION_ENCRYPT,
 	SC_PKCS11_OPERATION_DECRYPT,
 	SC_PKCS11_OPERATION_DERIVE,
 	SC_PKCS11_OPERATION_WRAP,
@@ -279,6 +285,11 @@ struct sc_pkcs11_mechanism_type {
 					CK_BYTE_PTR, CK_ULONG);
 	CK_RV		  (*verif_final)(sc_pkcs11_operation_t *,
 					CK_BYTE_PTR, CK_ULONG);
+	CK_RV		  (*encrypt_init)(sc_pkcs11_operation_t *,
+					struct sc_pkcs11_object *);
+	CK_RV		  (*encrypt)(sc_pkcs11_operation_t *,
+					CK_BYTE_PTR, CK_ULONG,
+					CK_BYTE_PTR, CK_ULONG_PTR);
 	CK_RV		  (*decrypt_init)(sc_pkcs11_operation_t *,
 					struct sc_pkcs11_object *);
 	CK_RV		  (*decrypt)(sc_pkcs11_operation_t *,
@@ -434,6 +445,8 @@ CK_RV sc_pkcs11_verif_init(struct sc_pkcs11_session *, CK_MECHANISM_PTR,
 CK_RV sc_pkcs11_verif_update(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG);
 CK_RV sc_pkcs11_verif_final(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG);
 #endif
+CK_RV sc_pkcs11_encr_init(struct sc_pkcs11_session *, CK_MECHANISM_PTR, struct sc_pkcs11_object *, CK_MECHANISM_TYPE);
+CK_RV sc_pkcs11_encr(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
 CK_RV sc_pkcs11_decr_init(struct sc_pkcs11_session *, CK_MECHANISM_PTR, struct sc_pkcs11_object *, CK_MECHANISM_TYPE);
 CK_RV sc_pkcs11_decr(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
 CK_RV sc_pkcs11_wrap(struct sc_pkcs11_session *,CK_MECHANISM_PTR, struct sc_pkcs11_object *, CK_KEY_TYPE, struct sc_pkcs11_object *, CK_BYTE_PTR, CK_ULONG_PTR);

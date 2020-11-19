@@ -3426,7 +3426,7 @@ pkcs15_set_attrib(struct sc_pkcs11_session *session, struct sc_pkcs15_object *p1
 			ck_rv = CKR_ATTRIBUTE_READ_ONLY;
 			goto set_attr_done;
 		}
-		rv = sc_pkcs15init_change_attrib(fw_data->p15_card, profile, p15_object, 
+		rv = sc_pkcs15init_change_attrib(fw_data->p15_card, profile, p15_object,
 				P15_ATTR_TYPE_VALUE, attr->pValue, (unsigned int) attr->ulValueLen);
 		break;
 	default:
@@ -3649,7 +3649,8 @@ struct sc_pkcs11_object_ops pkcs15_cert_ops = {
 	NULL,	/* derive */
 	NULL,	/* can_do */
 	NULL,	/* init_params */
-	NULL	/* wrap_key */
+	NULL,	/* wrap_key */
+	NULL	/* encrypt */
 };
 
 /*
@@ -4109,7 +4110,7 @@ pkcs15_prkey_unwrap(struct sc_pkcs11_session *session, void *obj,
 	struct	pkcs15_fw_data *fw_data = NULL;
 	struct	pkcs15_prkey_object *prkey = (struct pkcs15_prkey_object *) obj;
 	struct	pkcs15_any_object *targetKeyObj = (struct pkcs15_any_object *) targetKey;
-	int	rv;	
+	int	rv;
 
 	sc_log(context, "Initiating unwrapping with private key.");
 
@@ -4511,7 +4512,8 @@ struct sc_pkcs11_object_ops pkcs15_prkey_ops = {
 	pkcs15_prkey_derive,
 	pkcs15_prkey_can_do,
 	pkcs15_prkey_init_params,
-	NULL	/* wrap_key */
+	NULL,	/* wrap_key */
+	NULL	/* encrypt */
 };
 
 /*
@@ -4679,7 +4681,7 @@ pkcs15_pubkey_get_attribute(struct sc_pkcs11_session *session, void *object, CK_
 		return get_modulus_bits(pubkey->pub_data, attr);
 	case CKA_PUBLIC_EXPONENT:
 		return get_public_exponent(pubkey->pub_data, attr);
-	/* 
+	/*
 	 * PKCS#11 does not define a CKA_VALUE for a CKO_PUBLIC_KEY.
 	 * OpenSC does, but it is not consistent it what it returns
 	 * Internally to do verify, with OpenSSL, we need a SPKI that
@@ -4766,7 +4768,8 @@ struct sc_pkcs11_object_ops pkcs15_pubkey_ops = {
 	NULL,	/* derive */
 	NULL,	/* can_do */
 	NULL,	/* init_params */
-	NULL	/* wrap_key */
+	NULL,	/* wrap_key */
+	NULL	/* encrypt */
 };
 
 
@@ -4946,7 +4949,8 @@ struct sc_pkcs11_object_ops pkcs15_dobj_ops = {
 	NULL,	/* derive */
 	NULL,	/* can_do */
 	NULL,	/* init_params */
-	NULL	/* wrap_key */
+	NULL,	/* wrap_key */
+	NULL	/* encrypt */
 };
 
 
@@ -5155,6 +5159,78 @@ pkcs15_skey_unwrap(struct sc_pkcs11_session *session, void *obj,
 	return CKR_OK;
 }
 
+static CK_RV
+pkcs15_skey_decrypt(struct sc_pkcs11_session *session, void *obj,
+		CK_MECHANISM_PTR pMechanism,
+		CK_BYTE_PTR pEncryptedData, CK_ULONG ulEncryptedDataLen,
+		CK_BYTE_PTR pData, CK_ULONG_PTR pulDataLen)
+{
+	struct	sc_pkcs11_card *p11card = session->slot->p11card;
+	struct	pkcs15_fw_data *fw_data = NULL;
+	struct	pkcs15_skey_object *skey = (struct pkcs15_skey_object *) obj;
+	int	rv, flags = 0;
+
+	sc_log(context, "Initiating decryption with a secret key.");
+
+	if (!p11card)
+		return sc_to_cryptoki_error(SC_ERROR_INVALID_CARD, "C_Decrypt");
+	fw_data = (struct pkcs15_fw_data *) p11card->fws_data[session->slot->fw_data_idx];
+	if (!fw_data)
+		return sc_to_cryptoki_error(SC_ERROR_INTERNAL, "C_Decrypt");
+	if (!fw_data->p15_card)
+		return sc_to_cryptoki_error(SC_ERROR_INVALID_CARD, "C_Decrypt");
+
+	if (pMechanism == NULL || pEncryptedData == NULL || pData == NULL || ulEncryptedDataLen == 0 || pulDataLen == NULL || *pulDataLen == 0) {
+		sc_log(context, "One or more of mandatory arguments were NULL.");
+		return CKR_ARGUMENTS_BAD;
+	}
+
+	/* Check whether this key supports decrypt */
+	if (skey && !(skey->info->usage & SC_PKCS15_PRKEY_USAGE_DECRYPT))
+		skey = NULL;
+
+	/* TODO: should we look for a compatible key automatically? prv_next not implemented yet. */
+	/* skey = skey->prv_next; */
+
+	if (skey == NULL)
+		return CKR_KEY_FUNCTION_NOT_PERMITTED;
+
+	sc_log(context, "Using mechanism %lx.", pMechanism->mechanism);
+	/* Select the block cipher mode of operation */
+	switch (pMechanism->mechanism) {
+	case CKM_AES_ECB:
+		flags |= SC_ALGORITHM_AES_ECB;
+		break;
+	case CKM_AES_CBC_PAD:
+        /* the driver needs to do the un-padding detailed in PKCS #7 */
+		flags |= SC_ALGORITHM_AES_CBC_PAD; /* in this case, pMechanism->pParameter contains IV */
+		break;
+	case CKM_AES_CBC:
+		flags |= SC_ALGORITHM_AES_CBC; /* in this case, pMechanism->pParameter contains IV */
+		break;
+	default:
+		return CKR_MECHANISM_INVALID;
+	}
+
+	rv = sc_lock(p11card->card);
+
+	if (rv < 0)
+		return sc_to_cryptoki_error(rv, "C_Decrypt");
+
+	/* Call the card to do the decrypt operation */
+	rv = sc_pkcs15_decrypt_sym(fw_data->p15_card, skey->prv_p15obj, flags,
+		pEncryptedData, ulEncryptedDataLen, pData, *pulDataLen,
+		pMechanism->pParameter, pMechanism->ulParameterLen);
+
+	sc_unlock(p11card->card);
+
+	if (rv < 0)
+		return sc_to_cryptoki_error(rv, "C_Decrypt");
+
+	*pulDataLen = rv;
+	return CKR_OK;
+}
+
 /*
  * Wrap a key using a secret key. obj = wrapping key, targetKey = key to be wrapped.
  * Wrapped key data is returned in pData
@@ -5236,6 +5312,88 @@ pkcs15_skey_wrap(struct sc_pkcs11_session *session, void *obj,
 	return CKR_OK;
 }
 
+static CK_RV
+pkcs15_skey_encrypt(struct sc_pkcs11_session *session, void *obj,
+		CK_MECHANISM_PTR pMechanism,
+		CK_BYTE_PTR pData, CK_ULONG ulDataLen,
+		CK_BYTE_PTR pEncryptedData, CK_ULONG_PTR pulEncryptedDataLen)
+{
+	struct	sc_pkcs11_card *p11card = session->slot->p11card;
+	struct	pkcs15_fw_data *fw_data = NULL;
+	struct	pkcs15_skey_object *skey = (struct pkcs15_skey_object *) obj;
+	int	rv, flags = 0;
+	unsigned char block_size = 16;
+
+	sc_log(context, "Initiating encryption with a secret key.");
+
+	if (!p11card)
+		return sc_to_cryptoki_error(SC_ERROR_INVALID_CARD, "C_Encrypt");
+	fw_data = (struct pkcs15_fw_data *) p11card->fws_data[session->slot->fw_data_idx];
+	if (!fw_data)
+		return sc_to_cryptoki_error(SC_ERROR_INTERNAL, "C_Encrypt");
+	if (!fw_data->p15_card)
+		return sc_to_cryptoki_error(SC_ERROR_INVALID_CARD, "C_Encrypt");
+
+	if (pMechanism == NULL || pData == NULL || pEncryptedData == NULL || ulDataLen == 0 ||
+	    pulEncryptedDataLen == NULL || *pulEncryptedDataLen == 0) {
+		sc_log(context, "One or more of mandatory arguments were NULL.");
+		return CKR_ARGUMENTS_BAD;
+	}
+
+	/* Check whether this key supports encrypt */
+	if (skey && !(skey->info->usage & SC_PKCS15_PRKEY_USAGE_ENCRYPT))
+		skey = NULL;
+
+	/* TODO: should we look for a compatible key automatically? prv_next not implemented yet. */
+	/* skey = skey->prv_next; */
+
+	if (skey == NULL)
+		return CKR_KEY_FUNCTION_NOT_PERMITTED;
+
+	sc_log(context, "Using mechanism %lx.", pMechanism->mechanism);
+	/* Select the block cipher mode of operation */
+/*
+	if ((pMechanism->mechanism>=CKM_DES_KEY_GEN && pMechanism->mechanism<=CKM_DES3_CMAC) ||
+		(pMechanism->mechanism>=CKM_DES_ECB_ENCRYPT_DATA && pMechanism->mechanism<=CKM_DES3_CBC_ENCRYPT_DATA))
+		block_size = 8;
+*/
+
+	switch (pMechanism->mechanism) {
+	case CKM_AES_ECB:
+		if (ulDataLen % block_size)
+			return CKR_DATA_LEN_RANGE;
+		flags |= SC_ALGORITHM_AES_ECB;
+		break;
+	case CKM_AES_CBC_PAD:
+		/* the driver needs to do the padding detailed in PKCS #7 */
+		flags |= SC_ALGORITHM_AES_CBC_PAD; /* in this case, pMechanism->pParameter contains IV */
+		break;
+	case CKM_AES_CBC:
+		if (ulDataLen % block_size)
+			return CKR_DATA_LEN_RANGE;
+		flags |= SC_ALGORITHM_AES_CBC; /* in this case, pMechanism->pParameter contains IV */
+		break;
+	default:
+		return CKR_MECHANISM_INVALID;
+	}
+
+	rv = sc_lock(p11card->card);
+
+	if (rv < 0)
+		return sc_to_cryptoki_error(rv, "C_Encrypt");
+
+	/* Call the card to do the encrypt operation */
+	rv = sc_pkcs15_encrypt_sym(fw_data->p15_card, skey->prv_p15obj, flags,
+			pData, ulDataLen, pEncryptedData, *pulEncryptedDataLen,
+			pMechanism->pParameter, pMechanism->ulParameterLen);
+	sc_unlock(p11card->card);
+
+	if (rv < 0)
+		return sc_to_cryptoki_error(rv, "C_Encrypt");
+
+	*pulEncryptedDataLen = rv;
+	return CKR_OK;
+}
 
 /*
  *  Secret key objects, currently used only to retrieve derived session key
@@ -5249,11 +5407,12 @@ struct sc_pkcs11_object_ops pkcs15_skey_ops = {
 	NULL,	/* get_size */
 	NULL,	/* sign */
 	pkcs15_skey_unwrap,
-	NULL,	/* decrypt */
+	pkcs15_skey_decrypt,
 	NULL,	/* derive */
-	NULL,	/* can_do */
+	NULL,   /* can_do */
 	NULL,	/* init_params */
-	pkcs15_skey_wrap /* wrap_key */
+	pkcs15_skey_wrap, /* wrap_key */
+	pkcs15_skey_encrypt
 };
 
 /*
