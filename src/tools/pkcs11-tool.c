@@ -53,6 +53,7 @@
 #include <openssl/err.h>
 #endif
 
+#include "libopensc/log.h"
 #include "pkcs11/pkcs11.h"
 #include "pkcs11/pkcs11-opensc.h"
 #include "libopensc/asn1.h"
@@ -5837,6 +5838,263 @@ static int encrypt_decrypt(CK_SESSION_HANDLE session,
 	printf("OK\n");
 	return 0;
 }
+
+/* card/hardware encrypts, oppenssl decrypts */
+static
+int encrypt_decrypt_sym_1(CK_SESSION_HANDLE session,
+		CK_MECHANISM_TYPE mech_type,
+		CK_OBJECT_HANDLE secretKeyObject,
+		CK_ULONG key_len)  /* in bytes */
+{
+	unsigned char	aes_key_256[32] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+										0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+										0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+										0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20 };
+	unsigned char	orig_data[512]; /* first 'in_len_orig' bytes used as original plaintext, at least last 16 bytes unused */
+	unsigned char	encrypted[512], plaintext[512];
+	unsigned char   iv[16];
+	unsigned char   pad_len;
+	CK_MECHANISM	mech;
+	CK_ULONG	    in_len = 481; /* cards with short APDU syntax should prove correct chaining handling with >= 240 */
+	CK_ULONG	    encrypted_outlen = sizeof(encrypted);
+	CK_RV           rv;
+	EVP_CIPHER_CTX *ctx;
+	const EVP_CIPHER *type;
+	int             in_len_orig = in_len, plaintext_len = sizeof(plaintext), plaintext_len_result;
+
+	printf("    %s: ", p11_mechanism_to_name(mech_type));
+
+	pseudo_randomize(orig_data, sizeof(orig_data));
+	pseudo_randomize(iv, sizeof(iv));
+	memset(plaintext, 0, sizeof(plaintext)); /* the plaintext after encrypt/decrypt */
+
+	mech.mechanism = mech_type;
+	mech.pParameter = iv;
+	mech.ulParameterLen = sizeof(iv);
+
+	switch (key_len) {
+		case 16: type = EVP_aes_128_cbc(); break;
+		case 24: type = EVP_aes_192_cbc(); break;
+		case 32: type = EVP_aes_256_cbc(); break;
+		default: printf("\nError Return 1\n"); return 1;
+	}
+
+	switch (mech_type) {
+	case CKM_AES_ECB:
+	case CKM_AES_CBC:
+		/* this application does the padding to block_size 16 for AES) multiple, using PKCS padding */
+		pad_len = 16-in_len%16;
+		memset(orig_data + in_len, pad_len, pad_len);
+		in_len += pad_len;
+		if (mech_type == CKM_AES_ECB) {
+			mech.pParameter = NULL;
+			mech.ulParameterLen = 0;
+			switch (key_len) {
+				case 16: type = EVP_aes_128_ecb(); break;
+				case 24: type = EVP_aes_192_ecb(); break;
+				case 32: type = EVP_aes_256_ecb(); break;
+				default: printf("\nError Return 2\n"); return 1;
+			}
+		}
+		break;
+	case CKM_AES_CBC_PAD:
+		break;
+	default:
+		printf("Unsupported mechanism %s, returning\n", p11_mechanism_to_name(mech_type));
+		printf("\nError Return 3\n");
+		return 1;
+	}
+
+	rv = p11->C_EncryptInit(session, &mech, secretKeyObject);
+	if (rv != CKR_OK) {
+		printf("\nError Return 4\n");
+		return 1;
+	}
+
+	rv = p11->C_Encrypt(session, orig_data, in_len, encrypted, &encrypted_outlen);
+	if (rv != CKR_OK){
+		printf("\nError Return 5\n");
+		return 1;
+	}
+
+
+	/* Create and initialise the context */
+	if (!(ctx = EVP_CIPHER_CTX_new())) {
+		printf("\nError Return 6\n");
+		return 1;
+	}
+
+	if (1 != EVP_DecryptInit_ex(ctx, type, NULL, aes_key_256, iv)) {
+		printf("\nError Return 7\n");
+		return 1;
+	}
+
+	if (1 != EVP_DecryptUpdate(ctx, plaintext, &plaintext_len, encrypted, (int)encrypted_outlen)) {
+		printf("\nError Return 8\n");
+		return 1;
+	}
+
+	plaintext_len_result = plaintext_len;
+
+	if (1 != EVP_DecryptFinal_ex(ctx, plaintext + plaintext_len, &plaintext_len)) {
+		printf("\nError Return 9\n");
+		return 1;
+	}
+
+	plaintext_len_result += plaintext_len;
+
+	/* Clean up */
+	EVP_CIPHER_CTX_free(ctx);
+
+//printf("plaintext_len_result: %d, [%s]", plaintext_len_result, sc_dump_hex(plaintext, plaintext_len_result));
+	if (plaintext_len_result != in_len_orig) {
+		printf("\nError Return 10\n");
+		return 1;
+	}
+	if (memcmp(orig_data, plaintext, in_len_orig)) {
+		printf("\nError Return 11\n");
+		return 1;
+	}
+
+	printf("OK\n");
+	return 0;
+}
+
+/* oppenssl encrypts, card/hardware decrypts */
+static
+int encrypt_decrypt_sym_2(CK_SESSION_HANDLE session,
+		CK_MECHANISM_TYPE mech_type,
+		CK_OBJECT_HANDLE secretKeyObject,
+		CK_ULONG key_len)  /* in bytes */
+{
+	unsigned char	aes_key_256[32] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+										0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+										0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+										0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20 };
+	unsigned char	orig_data[512]; /* first 'orig_data_len' bytes used as original plaintext, at least last 16 bytes unused */
+	unsigned char	encrypted[512], plaintext[512];
+	unsigned char   iv[16];
+	unsigned char   pad_len;
+	CK_MECHANISM	mech;
+	CK_ULONG	    plaintext_len = sizeof(plaintext), encrypted_len_result;
+	CK_RV           rv;
+	EVP_CIPHER_CTX *ctx;
+	const EVP_CIPHER *type;
+	int              orig_data_len = 481; /* cards with short APDU syntax should prove correct chaining handling with >= 240 */
+	int              encrypted_len = sizeof(encrypted);
+
+	printf("    %s: ", p11_mechanism_to_name(mech_type));
+
+	pseudo_randomize(orig_data, sizeof(orig_data));
+	pseudo_randomize(iv, sizeof(iv));
+	memset(plaintext, 0, sizeof(plaintext)); /* the plaintext after encrypt/decrypt */
+
+	mech.mechanism = mech_type;
+
+	/* this application, respectively OpenSSL, does the padding to block_size 16 (for CKM_AES_ECB and CKM_AES_CBC) multiple, using PKCS padding */
+	switch (mech_type) {
+	case CKM_AES_ECB:
+		{
+			mech.pParameter = NULL;
+			mech.ulParameterLen = 0;
+			switch (key_len) {
+				case 16: type = EVP_aes_128_ecb(); break;
+				case 24: type = EVP_aes_192_ecb(); break;
+				case 32: type = EVP_aes_256_ecb(); break;
+				default: printf("\nError Return 1\n"); return 1;
+			}
+		}
+		break;
+	case CKM_AES_CBC:
+	case CKM_AES_CBC_PAD:
+		{
+			mech.pParameter = iv;
+			mech.ulParameterLen = sizeof(iv);
+			switch (key_len) {
+				case 16: type = EVP_aes_128_cbc(); break;
+				case 24: type = EVP_aes_192_cbc(); break;
+				case 32: type = EVP_aes_256_cbc(); break;
+				default: printf("\nError Return 2\n"); return 1;
+			}
+		}
+		break;
+	default:
+		printf("Unsupported mechanism %s, returning\n", p11_mechanism_to_name(mech_type));
+		printf("\nError Return 3\n");
+		return 1;
+	}
+
+	/* Create and initialise the context */
+	if (!(ctx = EVP_CIPHER_CTX_new())) {
+		printf("\nError Return 4\n");
+		return 1;
+	}
+
+	if (1 != EVP_EncryptInit_ex(ctx, type, NULL, aes_key_256, iv)) {
+		printf("\nError Return 5\n");
+		return 1;
+	}
+
+	if (1 != EVP_EncryptUpdate(ctx, encrypted, &encrypted_len, orig_data, orig_data_len)) {
+		printf("\nError Return 6\n");
+		return 1;
+	}
+
+	encrypted_len_result = encrypted_len;
+
+	if (1 != EVP_EncryptFinal_ex(ctx, encrypted + encrypted_len, &encrypted_len)) {
+		printf("\nError Return 7\n");
+		return 1;
+	}
+
+	encrypted_len_result += encrypted_len;
+//printf("encrypted_len_result: %lu\n", encrypted_len_result);
+
+	/* Clean up */
+	EVP_CIPHER_CTX_free(ctx);
+
+
+	rv = p11->C_DecryptInit(session, &mech, secretKeyObject);
+	if (rv != CKR_OK) {
+		printf("\nError Return 8\n");
+		return 1;
+	}
+//if (mech_type == CKM_AES_CBC_PAD)
+//printf("plaintext_len on entry of C_Decrypt: %lu\n", plaintext_len);
+	rv = p11->C_Decrypt(session, encrypted, encrypted_len_result, plaintext, &plaintext_len);
+	if (rv != CKR_OK) {
+		printf("\nError Return 9\n");
+		return 1;
+	}
+//printf("plaintext_len on exit  of C_Decrypt: %lu", plaintext_len);
+
+	// remove padding
+	if ((mech_type != CKM_AES_CBC_PAD) && (plaintext_len > 0))  {
+		pad_len = plaintext[plaintext_len-1];
+//printf(" pad_len: %02X",  pad_len);
+		if (pad_len==0 || pad_len>16) {
+			printf("\nError Return 10\n");
+			return 1;
+		}
+		if (plaintext_len >=  pad_len)
+			plaintext_len -=  pad_len;
+	}
+
+//printf("; plaintext_len after possibly removing padding: %lu; ", plaintext_len);
+//printf("plaintext_len after possibly removing padding: %lu, [%s]", plaintext_len, sc_dump_hex(plaintext, plaintext_len));
+	if (plaintext_len != (CK_ULONG)orig_data_len) {
+		printf("\nError Return 11\n");
+		return 1;
+	}
+	if (memcmp(orig_data, plaintext, orig_data_len)) {
+		printf("\nError Return 12\n");
+		return 1;
+	}
+
+	printf("OK\n");
+	return 0;
+}
+
 #endif
 
 
@@ -5919,6 +6177,165 @@ static int test_decrypt(CK_SESSION_HANDLE sess)
 			}
 
 			errors += encrypt_decrypt(sess, mechs[n], privKeyObject);
+		}
+#endif
+	}
+
+	free(mechs);
+	return errors;
+}
+
+/*
+ * Test symmetric algo (AES) encryption function
+ */
+static int test_encrypt_sym(CK_SESSION_HANDLE sess)
+{
+	int             errors = 0;
+	CK_RV           rv;
+	CK_OBJECT_HANDLE secretKeyObject;
+	CK_MECHANISM_TYPE *mechs = NULL;
+	CK_SESSION_INFO sessionInfo;
+	CK_ULONG        j, num_mechs = 0, key_len = 0;
+#ifdef ENABLE_OPENSSL
+	CK_ULONG        n;
+#endif
+	char 		*label;
+
+	rv = p11->C_GetSessionInfo(sess, &sessionInfo);
+	if (rv != CKR_OK)
+		p11_fatal("C_OpenSession", rv);
+/*
+	if (!(sessionInfo.state & CKS_RW_USER_FUNCTIONS)) {
+		printf("Encryption: not a R/W session, skipping encryption tests\n");
+		return errors;
+	}
+*/
+	num_mechs = get_mechanisms(sessionInfo.slotID, &mechs, CKF_ENCRYPT);
+	if (num_mechs == 0) {
+		printf("Encrypt: not implemented\n");
+		return errors;
+	}
+
+	printf("Encryption (currently only for AES)\n");
+	for (j = 0; find_object(sess, CKO_SECRET_KEY, &secretKeyObject, NULL, 0, j); j++) {
+		printf("  testing key %ld", j);
+		if ((label = getLABEL(sess, secretKeyObject, NULL)) != NULL) {
+			printf(" (%s)", label);
+			free(label);
+		}
+		if (getKEY_TYPE(sess, secretKeyObject) != CKK_AES) {
+			printf(" -- non-AES, skipping\n");
+			continue;
+		}
+		if (!getENCRYPT(sess, secretKeyObject)) {
+			printf(" -- can't be used to encrypt, skipping\n");
+			continue;
+		}
+		if ((key_len = getVALUE_LEN(sess, secretKeyObject)) != 0) {
+			printf(" %lu bit", key_len);
+		}
+		else
+			continue;
+
+		printf("\n");
+
+#ifndef ENABLE_OPENSSL
+		printf("No OpenSSL support, unable to validate encryption\n");
+#else
+		for (n = 0; n < num_mechs; n++) {
+			switch (mechs[n]) {
+			case CKM_AES_ECB:
+			case CKM_AES_CBC:
+			case CKM_AES_CBC_PAD:
+				break;
+			default:
+				printf(" -- mechanism can't be used to encrypt, skipping\n");
+				continue;
+			}
+
+			errors += encrypt_decrypt_sym_1(sess, mechs[n], secretKeyObject, key_len/8);
+		}
+#endif
+	}
+
+	free(mechs);
+	return errors;
+}
+
+/*
+ * Test symmetric algo (AES) decryption function
+ */
+static int test_decrypt_sym(CK_SESSION_HANDLE sess)
+{
+	int             errors = 0;
+	CK_RV           rv;
+	CK_OBJECT_HANDLE secretKeyObject;
+	CK_MECHANISM_TYPE *mechs = NULL;
+	CK_SESSION_INFO sessionInfo;
+	CK_ULONG        j, num_mechs = 0, key_len = 0;
+#ifdef ENABLE_OPENSSL
+	CK_ULONG        n;
+#endif
+	char 		*label;
+
+	rv = p11->C_GetSessionInfo(sess, &sessionInfo);
+	if (rv != CKR_OK)
+		p11_fatal("C_OpenSession", rv);
+/*
+	if (!(sessionInfo.state & CKS_RW_USER_FUNCTIONS)) {
+		printf("Decryption: not a R/W session, skipping decryption tests\n");
+		return errors;
+	}
+*/
+	num_mechs = get_mechanisms(sessionInfo.slotID, &mechs, CKF_DECRYPT);
+	if (num_mechs == 0) {
+		printf("Decrypt: not implemented\n");
+		return errors;
+	}
+
+	printf("Decryption (currently only for AES)\n");
+	for (j = 0; find_object(sess, CKO_SECRET_KEY, &secretKeyObject, NULL, 0, j); j++) {
+		printf("  testing key %ld", j);
+		if ((label = getLABEL(sess, secretKeyObject, NULL)) != NULL) {
+			printf(" (%s)", label);
+			free(label);
+		}
+		if (getKEY_TYPE(sess, secretKeyObject) != CKK_AES) {
+			printf(" -- non-AES, skipping\n");
+			continue;
+		}
+		if (!getDECRYPT(sess, secretKeyObject)) {
+			printf(" -- can't be used to decrypt, skipping\n");
+			continue;
+		}
+		if ((key_len = getVALUE_LEN(sess, secretKeyObject)) != 0) {
+			printf(" %lu bit", key_len);
+		}
+		else
+			continue;
+
+		printf("\n");
+
+#ifndef ENABLE_OPENSSL
+		printf("No OpenSSL support, unable to validate decryption\n");
+#else
+		for (n = 0; n < num_mechs; n++) {
+			switch (mechs[n]) {
+			case CKM_AES_ECB:
+//				printf(" -- mechanism CKM_AES_ECB can be used to decrypt\n");
+//				break;
+			case CKM_AES_CBC:
+//				printf(" -- mechanism CKM_AES_CBC can be used to decrypt\n");
+//				break;
+			case CKM_AES_CBC_PAD:
+//				printf(" -- mechanism CKM_AES_CBC_PAD can be used to decrypt\n");
+				break;
+			default:
+				printf(" -- mechanism can't be used to decrypt, skipping\n");
+				continue;
+			}
+
+			errors += encrypt_decrypt_sym_2(sess, mechs[n], secretKeyObject, key_len/8);
 		}
 #endif
 	}
@@ -6031,6 +6448,10 @@ static int p11_test(CK_SESSION_HANDLE session)
 	errors += test_unwrap(session);
 
 	errors += test_decrypt(session);
+
+	errors += test_encrypt_sym(session);
+
+	errors += test_decrypt_sym(session);
 
 	if (errors == 0)
 		printf("No errors\n");

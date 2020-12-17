@@ -196,9 +196,8 @@ static int use_key_sym(struct sc_pkcs15_card *p15card,
         if (r == SC_SUCCESS)
             r = sc_set_security_env(p15card->card, senv, 0);
 
-        if (r == SC_SUCCESS) {
+        if (r == SC_SUCCESS)
             r = card_command(p15card->card, in, inlen, out, outlen, senv->algorithm, senv->algorithm_flags);
-        }
 
         if (revalidated_cached_pin)
             /* only re-validate once */

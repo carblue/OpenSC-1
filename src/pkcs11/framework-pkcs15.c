@@ -5076,7 +5076,7 @@ pkcs15_skey_get_attribute(struct sc_pkcs11_session *session,
 		break;
 	case CKA_VALUE_LEN:
 		check_attribute_buffer(attr, sizeof(CK_ULONG));
-		*(CK_ULONG*)attr->pValue = skey->info->data.len;
+		*(CK_ULONG*)attr->pValue = skey->info->value_len;
 		break;
 	case CKA_VALUE:
 		check_attribute_buffer(attr, skey->info->data.len);
