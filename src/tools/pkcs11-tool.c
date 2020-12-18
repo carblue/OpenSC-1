@@ -5981,7 +5981,7 @@ int encrypt_decrypt_sym_2(CK_SESSION_HANDLE session,
 	EVP_CIPHER_CTX *ctx;
 	const EVP_CIPHER *type;
 	int              orig_data_len = 481; /* cards with short APDU syntax should prove correct chaining handling with >= 240 */
-	int              encrypted_len = sizeof(encrypted);
+	int              encrypted_len = sizeof(encrypted), i;
 
 	printf("    %s: ", p11_mechanism_to_name(mech_type));
 
@@ -6069,25 +6069,32 @@ int encrypt_decrypt_sym_2(CK_SESSION_HANDLE session,
 //printf("plaintext_len on exit  of C_Decrypt: %lu", plaintext_len);
 
 	// remove padding
-	if ((mech_type != CKM_AES_CBC_PAD) && (plaintext_len > 0))  {
+	if (mech_type != CKM_AES_CBC_PAD && plaintext_len > 0)  {
 		pad_len = plaintext[plaintext_len-1];
 //printf(" pad_len: %02X",  pad_len);
 		if (pad_len==0 || pad_len>16) {
 			printf("\nError Return 10\n");
 			return 1;
 		}
-		if (plaintext_len >=  pad_len)
+		if (plaintext_len >= pad_len) {
+			for (i=1; i<pad_len; i++) {
+				if (plaintext[plaintext_len-1-i] != pad_len) {
+					printf("\nError Return 11\n");
+					return 1;
+				}
+		    }
 			plaintext_len -=  pad_len;
+		}
 	}
 
 //printf("; plaintext_len after possibly removing padding: %lu; ", plaintext_len);
 //printf("plaintext_len after possibly removing padding: %lu, [%s]", plaintext_len, sc_dump_hex(plaintext, plaintext_len));
 	if (plaintext_len != (CK_ULONG)orig_data_len) {
-		printf("\nError Return 11\n");
+		printf("\nError Return 12\n");
 		return 1;
 	}
 	if (memcmp(orig_data, plaintext, orig_data_len)) {
-		printf("\nError Return 12\n");
+		printf("\nError Return 13\n");
 		return 1;
 	}
 

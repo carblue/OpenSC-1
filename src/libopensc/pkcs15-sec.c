@@ -170,49 +170,50 @@ static int use_key(struct sc_pkcs15_card *p15card,
 }
 
 static int use_key_sym(struct sc_pkcs15_card *p15card,
-                   const struct sc_pkcs15_object *obj,
-                   sc_security_env_t *senv,
-                   int (*card_command)(sc_card_t *card,
-                                       const u8 * in, size_t inlen,
-                                       u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags),
-                   const u8 * in, size_t inlen, u8 * out, size_t outlen)
+				   const struct sc_pkcs15_object *obj,
+				   sc_security_env_t *senv,
+				   int (*card_command)(sc_card_t *card,
+									   const u8 * in, size_t inlen, u8 * out, size_t outlen,
+									   unsigned int algorithm, unsigned int algorithm_flags, unsigned char key_ref[8]),
+				   const u8 * in, size_t inlen, u8 * out, size_t outlen)
 {
-    int r = SC_SUCCESS;
-    int revalidated_cached_pin = 0;
-    sc_path_t path;
-    LOG_TEST_RET(p15card->card->ctx, get_file_path(obj, &path), "Failed to get key file path.");
+	int r = SC_SUCCESS;
+	int revalidated_cached_pin = 0;
+	sc_path_t path;
+	LOG_TEST_RET(p15card->card->ctx, get_file_path(obj, &path), "Failed to get key file path.");
 
-    r = sc_lock(p15card->card);
-    LOG_TEST_RET(p15card->card->ctx, r, "sc_lock() failed");
+	r = sc_lock(p15card->card);
+	LOG_TEST_RET(p15card->card->ctx, r, "sc_lock() failed");
 
-    do {
-        if (path.len != 0 || path.aid.len != 0) {
-            r = select_key_file(p15card, obj, senv);
-            if (r < 0) {
-                sc_log(p15card->card->ctx,
-                       "Unable to select private key file");
-            }
-        }
-        if (r == SC_SUCCESS)
-            r = sc_set_security_env(p15card->card, senv, 0);
+	do {
+		if (path.len != 0 || path.aid.len != 0) {
+			r = select_key_file(p15card, obj, senv);
+			if (r < 0) {
+				sc_log(p15card->card->ctx,
+					"Unable to select private key file");
+			}
+	    }
+		if (r == SC_SUCCESS)
+			r = sc_set_security_env(p15card->card, senv, 0);
 
-        if (r == SC_SUCCESS)
-            r = card_command(p15card->card, in, inlen, out, outlen, senv->algorithm, senv->algorithm_flags);
+		if (r == SC_SUCCESS)
+			r = card_command(p15card->card, in, inlen, out, outlen,
+							 senv->algorithm, senv->algorithm_flags, senv->key_ref);
 
-        if (revalidated_cached_pin)
-            /* only re-validate once */
-            break;
-        if (r == SC_ERROR_SECURITY_STATUS_NOT_SATISFIED) {
-            r = sc_pkcs15_pincache_revalidate(p15card, obj);
-            if (r < 0)
-                break;
-            revalidated_cached_pin = 1;
-        }
-    } while (revalidated_cached_pin);
+		if (revalidated_cached_pin)
+			/* only re-validate once */
+			break;
+		if (r == SC_ERROR_SECURITY_STATUS_NOT_SATISFIED) {
+			r = sc_pkcs15_pincache_revalidate(p15card, obj);
+			if (r < 0)
+				break;
+			revalidated_cached_pin = 1;
+		}
+	} while (revalidated_cached_pin);
 
-    sc_unlock(p15card->card);
+	sc_unlock(p15card->card);
 
-    return r;
+	return r;
 }
 
 static int format_senv(struct sc_pkcs15_card *p15card,
@@ -469,12 +470,12 @@ int sc_pkcs15_unwrap(struct sc_pkcs15_card *p15card,
 	senv.algorithm_flags = sec_flags;
 
 	if ((sec_flags & (SC_ALGORITHM_AES_CBC | SC_ALGORITHM_AES_CBC_PAD)) > 0) {
-	    senv_param = (sc_sec_env_param_t) { SC_SEC_ENV_PARAM_IV, (void*) param, paramlen };
-	    LOG_TEST_RET(ctx, sec_env_add_param(&senv, &senv_param), "failed to add IV to security environment");
+		senv_param = (sc_sec_env_param_t) { SC_SEC_ENV_PARAM_IV, (void*) param, paramlen };
+		LOG_TEST_RET(ctx, sec_env_add_param(&senv, &senv_param), "failed to add IV to security environment");
 	}
 
 	r = use_key(p15card, key, &senv, sc_unwrap, in, inlen, out,
-		    poutlen);
+			poutlen);
 	LOG_TEST_RET(ctx, r, "use_key() failed");
 
 	LOG_FUNC_RETURN(ctx, r);

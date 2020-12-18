@@ -805,25 +805,27 @@ struct sc_card_operations {
 	/* encrypt_sym:  Engages the enciphering operation with a sym. key.  Card will use the
 	 *   security environment set in a call to set_security_env or restore_security_env.
 	 *
-	 *   Responsibility for padding to block_size (if applicable) depends on AES algorithm_flags used:
+	 *   Responsibility for padding to block_size depends on AES algorithm_flags used:
 	 *   SC_ALGORITHM_AES_ECB and SC_ALGORITHM_AES_CBC: The calling PKCS#11 app. is responsible.
-	 *   SC_ALGORITHM_AES_CBC_PAD: The card driver is responsible, assuming that all cards
-	 *   require block_size multiple as input.
+	 *   SC_ALGORITHM_AES_CBC_PAD: The card driver is responsible to add PKCS#7 padding,
+	 *   assuming that all cards require block_size multiple as input.
 	 */
 	int (*encrypt_sym)(struct sc_card *card, const u8 * plaintext, size_t plaintext_len,
-			u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags);
+			u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags,
+			unsigned char key_ref[8]);
 
 	/* decrypt_sym:  Engages the deciphering operation with a sym. key.  Card will use the
 	 *   security environment set in a call to set_security_env or
 	 *   restore_security_env.
 	 *
-	 *   Responsibility for removing padding (if applicable) depends on AES algorithm_flags used:
+	 *   Responsibility for removing padding depends on AES algorithm_flags used:
 	 *   SC_ALGORITHM_AES_ECB and SC_ALGORITHM_AES_CBC: The calling PKCS#11 app. is responsible.
-	 *   SC_ALGORITHM_AES_CBC_PAD: The card driver is responsible, assuming that all cards
-	 *   return block_size multiple as output.
+	 *   SC_ALGORITHM_AES_CBC_PAD: The card driver is responsible to remove PKCS#7 padding,
+	 *   assuming that all cards return block_size multiple as output.
 	 */
 	int (*decrypt_sym)(struct sc_card *card, const u8 * crgram, size_t crgram_len,
-			u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags);
+			u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags,
+			unsigned char key_ref[8]);
 };
 
 typedef struct sc_card_driver {
@@ -1378,9 +1380,11 @@ int sc_reset_retry_counter(struct sc_card *card, unsigned int type,
 int sc_build_pin(u8 *buf, size_t buflen, struct sc_pin_cmd_pin *pin, int pad);
 
 int sc_encrypt_sym(struct sc_card *card, const u8 * plaintext, size_t plaintext_len,
-			 u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags);
+			u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags,
+			unsigned char key_ref[8]);
 int sc_decrypt_sym(struct sc_card *card, const u8 * crgram, size_t crgram_len,
-			 u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags);
+			u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags,
+			unsigned char key_ref[8]);
 
 
 /********************************************************************/

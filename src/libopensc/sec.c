@@ -335,8 +335,8 @@ int sc_build_pin(u8 *buf, size_t buflen, struct sc_pin_cmd_pin *pin, int pad)
 	return i;
 }
 
-int sc_encrypt_sym(struct sc_card *card, const u8 * plaintext, size_t plaintext_len,
-		u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags)
+int sc_encrypt_sym(struct sc_card *card, const u8 * plaintext, size_t plaintext_len, u8 * out, size_t outlen,
+				unsigned int algorithm, unsigned int algorithm_flags, unsigned char key_ref[8])
 {
 	int r;
 
@@ -347,12 +347,12 @@ int sc_encrypt_sym(struct sc_card *card, const u8 * plaintext, size_t plaintext_
 	if (card->ops->encrypt_sym == NULL)
 		SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, SC_ERROR_NOT_SUPPORTED);
 	r = card->ops->encrypt_sym(card, plaintext, plaintext_len, out, outlen,
-			algorithm, algorithm_flags);
+			algorithm, algorithm_flags, key_ref);
 	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, r);
 }
 
-int sc_decrypt_sym(struct sc_card *card, const u8 * crgram, size_t crgram_len,
-		u8 * out, size_t outlen, unsigned int algorithm, unsigned int algorithm_flags)
+int sc_decrypt_sym(struct sc_card *card, const u8 * crgram, size_t crgram_len, u8 * out, size_t outlen,
+				unsigned int algorithm, unsigned int algorithm_flags, unsigned char key_ref[8])
 {
 	int r;
 
@@ -363,6 +363,6 @@ int sc_decrypt_sym(struct sc_card *card, const u8 * crgram, size_t crgram_len,
 	if (card->ops->decrypt_sym == NULL)
 		SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, SC_ERROR_NOT_SUPPORTED);
 		r = card->ops->decrypt_sym(card, crgram, crgram_len, out, outlen,
-				algorithm, algorithm_flags);
+				algorithm, algorithm_flags, key_ref);
 	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, r);
 }
