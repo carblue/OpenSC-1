@@ -5850,9 +5850,10 @@ int encrypt_decrypt_sym_1(CK_SESSION_HANDLE session,
 										0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 										0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
 										0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20 };
-	unsigned char	orig_data[512]; /* first 'in_len_orig' bytes used as original plaintext, at least last 16 bytes unused */
+	const unsigned char block_size = 16; /* FIXME that limits the impl. to block ciphers like AES */
+	unsigned char	orig_data[512]; /* first 'in_len_orig' bytes used as original plaintext, at least last block_size bytes unused */
 	unsigned char	encrypted[512], plaintext[512];
-	unsigned char   iv[16];
+	unsigned char   iv[block_size];
 	unsigned char   pad_len;
 	CK_MECHANISM	mech;
 	CK_ULONG	    in_len = 481; /* cards with short APDU syntax should prove correct chaining handling with >= 240 */
@@ -5882,8 +5883,8 @@ int encrypt_decrypt_sym_1(CK_SESSION_HANDLE session,
 	switch (mech_type) {
 	case CKM_AES_ECB:
 	case CKM_AES_CBC:
-		/* this application does the padding to block_size 16 for AES) multiple, using PKCS padding */
-		pad_len = 16-in_len%16;
+		/* this application does the padding to block_size multiple, using PKCS padding */
+		pad_len = block_size - in_len % block_size;
 		memset(orig_data + in_len, pad_len, pad_len);
 		in_len += pad_len;
 		if (mech_type == CKM_AES_ECB) {
@@ -5971,9 +5972,10 @@ int encrypt_decrypt_sym_2(CK_SESSION_HANDLE session,
 										0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 										0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
 										0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20 };
-	unsigned char	orig_data[512]; /* first 'orig_data_len' bytes used as original plaintext, at least last 16 bytes unused */
+	const unsigned char block_size = 16; /* FIXME that limits the impl. to block ciphers like AES */
+	unsigned char	orig_data[512]; /* first 'orig_data_len' bytes used as original plaintext, at least last block_size bytes unused */
 	unsigned char	encrypted[512], plaintext[512];
-	unsigned char   iv[16];
+	unsigned char   iv[block_size];
 	unsigned char   pad_len;
 	CK_MECHANISM	mech;
 	CK_ULONG	    plaintext_len = sizeof(plaintext), encrypted_len_result;
@@ -5991,7 +5993,7 @@ int encrypt_decrypt_sym_2(CK_SESSION_HANDLE session,
 
 	mech.mechanism = mech_type;
 
-	/* this application, respectively OpenSSL, does the padding to block_size 16 (for CKM_AES_ECB and CKM_AES_CBC) multiple, using PKCS padding */
+	/* this application, respectively OpenSSL, does the padding to block_size multiple (for CKM_AES_ECB and CKM_AES_CBC), using PKCS padding */
 	switch (mech_type) {
 	case CKM_AES_ECB:
 		{
@@ -6072,7 +6074,7 @@ int encrypt_decrypt_sym_2(CK_SESSION_HANDLE session,
 	if (mech_type != CKM_AES_CBC_PAD && plaintext_len > 0)  {
 		pad_len = plaintext[plaintext_len-1];
 //printf(" pad_len: %02X",  pad_len);
-		if (pad_len==0 || pad_len>16) {
+		if (pad_len==0 || pad_len>block_size) {
 			printf("\nError Return 10\n");
 			return 1;
 		}
@@ -6083,7 +6085,7 @@ int encrypt_decrypt_sym_2(CK_SESSION_HANDLE session,
 					return 1;
 				}
 		    }
-			plaintext_len -=  pad_len;
+			plaintext_len -= pad_len;
 		}
 	}
 
